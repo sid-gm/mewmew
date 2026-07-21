@@ -91,6 +91,33 @@
     display:none;text-align:center;pointer-events:none;z-index:1;
     font:700 15px 'Nunito',sans-serif;color:rgba(42,36,85,.35);max-width:240px;line-height:1.5;
   }
+
+  /* ---- rich link embed card ---- */
+  .emb-card{background:#fff;border-radius:16px;box-shadow:0 10px 22px rgba(42,36,85,.18);overflow:hidden;outline-offset:3px}
+  .emb-thumb{position:relative;width:100%;aspect-ratio:16/9;background:#E9EBFB center/cover no-repeat;display:flex;align-items:center;justify-content:center}
+  .emb-play{width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.94);box-shadow:0 4px 14px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .emb-play:active{transform:scale(.94)}
+  .emb-foot{position:relative;padding:12px 42px 13px 14px}
+  .emb-title{font:700 15px/1.3 'Nunito',sans-serif;color:#2A2455;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:19px;word-break:break-word}
+  .emb-src{display:flex;align-items:center;gap:7px;margin-top:7px}
+  .emb-fav{width:16px;height:16px;border-radius:4px;flex-shrink:0;object-fit:cover}
+  .emb-site{font:600 13px 'Nunito',sans-serif;color:#9A99B8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .emb-info{position:absolute;right:11px;top:12px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:#B9B8CE;cursor:pointer}
+  .emb-info:hover{color:#4B2ED6}
+  .shimmer{background-image:linear-gradient(100deg,#E9EBFB 30%,#F4F5FF 50%,#E9EBFB 70%)!important;background-size:200% 100%;animation:sh 1.2s ease infinite}
+  .shimmer-text{color:transparent!important;background:linear-gradient(100deg,#E9EBFB 30%,#F4F5FF 50%,#E9EBFB 70%);background-size:200% 100%;animation:sh 1.2s ease infinite;border-radius:6px;width:82%}
+  @keyframes sh{from{background-position:200% 0}to{background-position:-200% 0}}
+
+  /* ---- paste-a-link sheet ---- */
+  #linkBackdrop{position:absolute;inset:0;z-index:6;display:none}
+  #linkSheet{
+    position:absolute;top:calc(74px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+    display:none;align-items:center;gap:8px;background:#fff;border-radius:16px;
+    box-shadow:0 14px 34px rgba(42,36,85,.28);padding:8px 8px 8px 16px;z-index:7;width:min(420px,86vw);
+  }
+  #linkInput{flex:1;min-width:0;border:none;outline:none;background:transparent;font:700 16px 'Nunito',sans-serif;color:#2A2455}
+  #linkInput::placeholder{color:rgba(42,36,85,.35)}
+  #linkGo{width:38px;height:38px;flex-shrink:0;background:#4B2ED6;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font:800 20px 'Nunito',sans-serif;cursor:pointer}
 </style>
 </head>
 <body>
@@ -126,8 +153,15 @@
         <div class="row"><div class="label">Note</div><div class="tool" data-tool="note"><div style="width:20px;height:20px;background:#FFC53D;border-radius:6px"></div></div></div>
         <div class="row"><div class="label">Text</div><div class="tool" data-tool="text" style="font:800 20px 'Baloo 2',sans-serif;color:#4B2ED6">T</div></div>
         <div class="row"><div class="label">Arrow</div><div class="tool" data-tool="arrow" style="font:800 22px 'Nunito',sans-serif;color:#4B2ED6">→</div></div>
+        <div class="row"><div class="label">Link</div><div class="tool" data-tool="link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 15l6-6M8.5 12.5l-1.7 1.7a3.1 3.1 0 0 0 4.4 4.4l1.7-1.7M15.5 11.5l1.7-1.7a3.1 3.1 0 0 0-4.4-4.4l-1.7 1.7" stroke="#4B2ED6" stroke-width="2" stroke-linecap="round"/></svg></div></div>
       </div>
       <div class="main" id="fabMain">＋</div>
+    </div>
+
+    <div id="linkBackdrop"></div>
+    <div id="linkSheet">
+      <input id="linkInput" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste a link…">
+      <div id="linkGo">→</div>
     </div>
   </div>
 
@@ -193,18 +227,108 @@
   var fabStack = document.getElementById('fabStack');
   var fabMain = document.getElementById('fabMain');
   var hint = document.getElementById('hint');
+  var linkSheet = document.getElementById('linkSheet');
+  var linkInput = document.getElementById('linkInput');
+  var linkGo = document.getElementById('linkGo');
+  var linkBackdrop = document.getElementById('linkBackdrop');
 
   var itemNodes = {}; // id -> { el, disp, ta, handle }
 
   // ---------- geometry ----------
   function dims(it){
     if (it.type === 'note') return { w: it.s, h: it.s };
+    if (it.type === 'embed'){
+      var ew = it.w || 280;
+      var hasThumb = it.image || it.estate === 'loading';
+      return { w: ew, h: hasThumb ? Math.round(ew * 0.5625) + 72 : 92 };
+    }
     var len = Math.max(3, (it.text || '').length);
     return { w: Math.min(240, Math.max(56, len * it.fs * 0.48)) + 16, h: it.fs * 1.3 + 8 };
   }
   function toWorld(clientX, clientY){
     var r = board.getBoundingClientRect();
     return { x: (clientX - r.left - state.pan.x) / state.scale, y: (clientY - r.top - state.pan.y) / state.scale };
+  }
+
+  // ---------- link embeds ----------
+  var UNFURL_EP = '/api/unfurl';
+  var playSVG = '<svg width="20" height="22" viewBox="0 0 20 22" fill="none"><path d="M3 2.6v16.8a1 1 0 0 0 1.53.85l13.9-8.4a1 1 0 0 0 0-1.7L4.53 1.75A1 1 0 0 0 3 2.6Z" fill="#2A2455"/></svg>';
+  var infoSVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5M12 8.1v.02" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>';
+
+  function normalizeUrl(s){
+    if (!s) return null;
+    s = s.trim();
+    if (!/^https?:\/\//i.test(s)){
+      if (/^[\w-]+(\.[\w-]+)+(\/|$|\?|#)/.test(s)) s = 'https://' + s; else return null;
+    }
+    try { var u = new URL(s); return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null; }
+    catch(e){ return null; }
+  }
+  function ytId(u){
+    if (/(^|\.)youtu\.be$/.test(u.hostname)) return u.pathname.slice(1).split('/')[0] || null;
+    if (/(^|\.)youtube\.com$/.test(u.hostname)){
+      var v = u.searchParams.get('v'); if (v) return v;
+      var m = u.pathname.match(/\/(embed|shorts|live)\/([^/?#]+)/); if (m) return m[2];
+    }
+    return null;
+  }
+  // Instant metadata from the URL alone — thumbnails + provider show before the fetch returns.
+  function quickMeta(url){
+    var u; try { u = new URL(url); } catch(e){ return { provider:url, siteName:url, favicon:'', kind:'link', image:null }; }
+    var host = u.hostname.replace(/^www\./,'');
+    var out = { provider:host, siteName:host, favicon:'https://icons.duckduckgo.com/ip3/'+host+'.ico', kind:'link', image:null };
+    var yt = ytId(u);
+    if (yt){ out.image = 'https://i.ytimg.com/vi/'+yt+'/hqdefault.jpg'; out.kind='video'; out.siteName='YouTube'; return out; }
+    if (/(^|\.)vimeo\.com$/.test(u.hostname)){ out.kind='video'; out.siteName='Vimeo'; }
+    else if (/(^|\.)loom\.com$/.test(u.hostname)){ out.kind='video'; out.siteName='Loom'; }
+    else if (/(^|\.)tiktok\.com$/.test(u.hostname)){ out.kind='video'; out.siteName='TikTok'; }
+    return out;
+  }
+  function addEmbed(url, x, y){
+    var q = quickMeta(url);
+    var id = 'e' + (state.uid++);
+    var it = { id:id, type:'embed', x:x, y:y, w:280, url:url,
+               title:null, image:q.image, favicon:q.favicon, siteName:q.siteName, provider:q.provider, kind:q.kind, estate:'loading' };
+    state.items.push(it);
+    state.sel=id; state.selType='item'; state.editing=null; state.fabOpen=false; state.mode='idle';
+    render(); save();
+    unfurl(it);
+  }
+  function unfurl(it){
+    if (location.protocol === 'file:'){   // no backend when opened as a bare file
+      var f = findItem(it.id); if (!f) return;
+      if (!f.title) f.title = f.provider || f.url;
+      f.estate = 'ready'; render(); save(); return;
+    }
+    fetch(UNFURL_EP + '?url=' + encodeURIComponent(it.url))
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ settleEmbed(it.id, d); })
+      .catch(function(){ settleEmbed(it.id, null); });
+  }
+  function settleEmbed(id, d){
+    var cur = findItem(id); if (!cur) return;
+    if (d){
+      if (d.title) cur.title = d.title;
+      if (d.image) cur.image = d.image;
+      if (d.siteName) cur.siteName = d.siteName;
+      if (d.favicon) cur.favicon = d.favicon;
+      if (d.kind) cur.kind = d.kind;
+    }
+    if (!cur.title) cur.title = cur.provider || cur.url;
+    cur.estate = 'ready';
+    render(); save();
+  }
+  function openUrl(id){ var it = findItem(id); if (it && it.url) window.open(it.url, '_blank', 'noopener,noreferrer'); }
+
+  function openLinkSheet(){ linkInput.value=''; linkSheet.style.display='flex'; linkBackdrop.style.display='block'; setTimeout(function(){ linkInput.focus(); }, 30); }
+  function closeLinkSheet(){ linkSheet.style.display='none'; linkBackdrop.style.display='none'; linkInput.blur(); }
+  function submitLink(){
+    var u = normalizeUrl(linkInput.value);
+    if (!u){ closeLinkSheet(); return; }
+    var r = board.getBoundingClientRect();
+    var p = toWorld(r.width/2, r.height*0.42);
+    closeLinkSheet();
+    addEmbed(u, p.x - 140, p.y - 90);
   }
 
   // ---------- pointer / drag machinery ----------
@@ -257,7 +381,7 @@
     e.stopPropagation();
     var it = findItem(id);
     if (!it) return;
-    drag = { t:'resize', id:id, sx:e.clientX, sy:e.clientY, o: it.type === 'note' ? it.s : it.fs, kind: it.type, moved:false };
+    drag = { t:'resize', id:id, sx:e.clientX, sy:e.clientY, o: it.type === 'note' ? it.s : it.type === 'embed' ? (it.w||280) : it.fs, kind: it.type, moved:false };
     listen();
   }
   function winMove(e){
@@ -285,6 +409,7 @@
       render();
     } else if (d0.t === 'resize'){
       if (d0.kind === 'note') setItem(d0.id, { s: clamp(d0.o + Math.max(dx, dy)/sc, 84, 240) });
+      else if (d0.kind === 'embed') setItem(d0.id, { w: clamp(d0.o + dx/sc, 200, 460) });
       else setItem(d0.id, { fs: clamp(d0.o + dx/sc * 0.2, 14, 46) });
     }
   }
@@ -321,7 +446,8 @@
     }
   }
   function itemTap(id){
-    if (state.sel === id && state.selType === 'item') state.editing = id;
+    var it = findItem(id);
+    if (state.sel === id && state.selType === 'item' && it && it.type !== 'embed') state.editing = id;
     else { state.sel = id; state.selType = 'item'; state.editing = null; }
     render();
   }
@@ -402,6 +528,47 @@
     n.disp.style.cssText = dispStyle;
     n.disp.textContent = it.text || '';
   }
+  function buildEmbed(n, it){
+    var card = document.createElement('div'); card.className = 'emb-card';
+    var thumb = document.createElement('div'); thumb.className = 'emb-thumb';
+    var play = document.createElement('div'); play.className = 'emb-play'; play.innerHTML = playSVG;
+    thumb.appendChild(play);
+    var foot = document.createElement('div'); foot.className = 'emb-foot';
+    var title = document.createElement('div'); title.className = 'emb-title';
+    var src = document.createElement('div'); src.className = 'emb-src';
+    var fav = document.createElement('img'); fav.className = 'emb-fav'; fav.alt = '';
+    fav.addEventListener('error', function(){ fav.style.visibility = 'hidden'; });
+    var site = document.createElement('span'); site.className = 'emb-site';
+    src.appendChild(fav); src.appendChild(site);
+    var info = document.createElement('div'); info.className = 'emb-info'; info.innerHTML = infoSVG;
+    foot.appendChild(title); foot.appendChild(src); foot.appendChild(info);
+    card.appendChild(thumb); card.appendChild(foot);
+    n.el.appendChild(card);
+    function stop(e){ e.stopPropagation(); }
+    function open(e){ e.stopPropagation(); openUrl(it.id); }
+    play.addEventListener('pointerdown', stop); play.addEventListener('click', open);
+    info.addEventListener('pointerdown', stop); info.addEventListener('click', open);
+    n.embCard = card;
+    n.emb = { thumb:thumb, play:play, title:title, fav:fav, site:site };
+  }
+  function updateEmbed(n, it){
+    var e = n.emb, loading = it.estate === 'loading';
+    if (it.image){
+      e.thumb.style.display = 'flex'; e.thumb.classList.remove('shimmer');
+      e.thumb.style.backgroundImage = 'url("' + it.image.replace(/"/g,'%22') + '")';
+    } else if (loading){
+      e.thumb.style.display = 'flex'; e.thumb.style.backgroundImage = 'none'; e.thumb.classList.add('shimmer');
+    } else {
+      e.thumb.style.display = 'none';
+    }
+    e.play.style.display = (it.image && it.kind === 'video') ? 'flex' : 'none';
+    if (it.title){ e.title.textContent = it.title; e.title.classList.remove('shimmer-text'); }
+    else if (loading){ e.title.textContent = ''; e.title.classList.add('shimmer-text'); }
+    else { e.title.textContent = it.url; e.title.classList.remove('shimmer-text'); }
+    if (it.favicon){ e.fav.style.display = 'block'; e.fav.style.visibility = 'visible'; if (e.fav.getAttribute('src') !== it.favicon) e.fav.src = it.favicon; }
+    else e.fav.style.display = 'none';
+    e.site.textContent = it.siteName || it.provider || '';
+  }
   function updateNode(it){
     var n = ensureNode(it);
     var el = n.el;
@@ -419,6 +586,12 @@
       } else {
         setViewing(n, it, "font:700 "+nfs+"px/1.3 'Nunito',sans-serif;color:"+tc+";white-space:pre-wrap;word-break:break-word;pointer-events:none");
       }
+    } else if (it.type === 'embed'){
+      var ew = it.w || 280;
+      el.style.cssText = 'position:absolute;left:'+it.x+'px;top:'+it.y+'px;width:'+ew+'px;touch-action:none;cursor:grab';
+      if (!n.emb) buildEmbed(n, it);
+      n.embCard.style.outline = outline;
+      updateEmbed(n, it);
     } else {
       var fs = Math.round(it.fs);
       el.style.cssText = 'position:absolute;left:'+it.x+'px;top:'+it.y+'px;min-width:40px;min-height:24px;padding:4px 8px;touch-action:none;cursor:grab;outline:'+outline+';outline-offset:4px;border-radius:6px';
@@ -523,11 +696,13 @@
     // item color toolbar
     var selItem = state.selType === 'item' ? byId[state.sel] : null;
     if (selItem && !state.editing){
+      var isEmbed = selItem.type === 'embed';
       var sd = dims(selItem);
       itemTb.style.left = (selItem.x + sd.w/2) + 'px';
       itemTb.style.top = (selItem.y - 16) + 'px';
       itemTb.style.display = 'flex';
-      swatches.forEach(function(s, i){ s.style.outline = (selItem.color === PALETTE[i]) ? '2.5px solid #4B2ED6' : 'none'; });
+      divider.style.display = isEmbed ? 'none' : 'block';
+      swatches.forEach(function(s, i){ s.style.display = isEmbed ? 'none' : 'block'; s.style.outline = (!isEmbed && selItem.color === PALETTE[i]) ? '2.5px solid #4B2ED6' : 'none'; });
       if (!itemTb._shown){ itemTb.classList.remove('pop'); void itemTb.offsetWidth; itemTb.classList.add('pop'); itemTb._shown = true; }
     } else { itemTb.style.display = 'none'; itemTb._shown = false; }
 
@@ -573,10 +748,32 @@
   document.querySelectorAll('#fab .tool').forEach(function(t){
     t.addEventListener('pointerdown', function(e){
       e.stopPropagation();
-      state.mode = t.dataset.tool; state.fabOpen = false;
-      state.arrowFrom = null; state.sel = null; state.selType = null; state.editing = null;
+      state.fabOpen = false; state.arrowFrom = null; state.sel = null; state.selType = null; state.editing = null;
+      if (t.dataset.tool === 'link'){ state.mode = 'idle'; render(); openLinkSheet(); return; }
+      state.mode = t.dataset.tool;
       render();
     });
+  });
+
+  // link sheet
+  linkSheet.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+  linkBackdrop.addEventListener('pointerdown', function(e){ e.stopPropagation(); closeLinkSheet(); });
+  linkGo.addEventListener('pointerdown', function(e){ e.stopPropagation(); submitLink(); });
+  linkInput.addEventListener('keydown', function(e){
+    if (e.key === 'Enter'){ e.preventDefault(); submitLink(); }
+    else if (e.key === 'Escape'){ e.preventDefault(); closeLinkSheet(); }
+  });
+
+  // desktop bonus: paste a link straight onto the board
+  window.addEventListener('paste', function(e){
+    if (state.editing || document.activeElement === linkInput) return;
+    var t = (e.clipboardData && e.clipboardData.getData('text')) || '';
+    var u = normalizeUrl(t);
+    if (!u) return;
+    e.preventDefault();
+    var r = board.getBoundingClientRect();
+    var p = toWorld(r.width/2, r.height*0.42);
+    addEmbed(u, p.x - 140, p.y - 90);
   });
   // keep the whole fab/zoom groups from starting a canvas pan
   document.getElementById('fab').addEventListener('pointerdown', function(e){ e.stopPropagation(); });
@@ -598,6 +795,9 @@
   window.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
   render();
+
+  // resume any embeds that hadn't finished loading last session
+  state.items.forEach(function(it){ if (it.type === 'embed' && it.estate !== 'ready') unfurl(it); });
 })();
 </script>
 </body>
