@@ -53,6 +53,8 @@
     padding:9px 16px;font:800 17px 'Baloo 2',sans-serif;color:#2A2455;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60vw;
   }
+  #topbar .back{cursor:pointer}
+  #topbar .back, #topbar .title, #titleInput{pointer-events:auto}
 
   #banner{
     position:absolute;top:calc(70px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);
@@ -118,6 +120,35 @@
   #linkInput{flex:1;min-width:0;border:none;outline:none;background:transparent;font:700 16px 'Nunito',sans-serif;color:#2A2455}
   #linkInput::placeholder{color:rgba(42,36,85,.35)}
   #linkGo{width:38px;height:38px;flex-shrink:0;background:#4B2ED6;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font:800 20px 'Nunito',sans-serif;cursor:pointer}
+
+  /* ---- home / board list ---- */
+  #home{position:fixed;inset:0;z-index:10;background:#F3F5FF;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none}
+  #home.on{display:block}
+  #homeWrap{max-width:920px;margin:0 auto;padding:calc(20px + env(safe-area-inset-top)) 18px calc(40px + env(safe-area-inset-bottom))}
+  #homeBar{display:flex;align-items:center;justify-content:space-between;margin:6px 4px 20px}
+  #homeBar .brand{font:800 24px 'Baloo 2',sans-serif;color:#2A2455}
+  #homeNew{width:44px;height:44px;background:#4B2ED6;border-radius:14px;box-shadow:0 8px 18px rgba(75,46,214,.35);display:flex;align-items:center;justify-content:center;color:#fff;font:800 26px 'Nunito',sans-serif;cursor:pointer}
+  #homeNew:active{transform:scale(.94)}
+  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+  .bcard{position:relative;background:#fff;border-radius:18px;box-shadow:0 6px 16px rgba(42,36,85,.12);overflow:hidden;cursor:pointer;animation:popin .18s ease}
+  .bcard:active{transform:scale(.975)}
+  .bcard .prev{aspect-ratio:4/3;background:#F7F8FF;border-bottom:1px solid #EFF0FB;display:block;width:100%}
+  .bcard .prev.empty{display:flex;align-items:center;justify-content:center;color:#C9C8DE;font:800 30px 'Baloo 2',sans-serif}
+  .bcard .meta{padding:10px 12px 12px}
+  .bcard .bname{font:800 15px 'Baloo 2',sans-serif;color:#2A2455;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bcard .bsub{margin-top:3px;font:700 12px 'Nunito',sans-serif;color:#9C9AB6}
+  .bcard .del{position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.92);box-shadow:0 3px 10px rgba(42,36,85,.2);display:flex;align-items:center;justify-content:center;color:#8B89A6;font:800 15px 'Nunito',sans-serif;cursor:pointer}
+  .bcard .del:active{color:#FF6B5E}
+  .bcard.confirm .prev{filter:blur(2px) brightness(.96)}
+  .bcard .confirm-bar{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(247,248,255,.82)}
+  .bcard.confirm .confirm-bar{display:flex}
+  .bcard .confirm-bar .q{font:800 14px 'Baloo 2',sans-serif;color:#2A2455}
+  .bcard .confirm-bar .row{display:flex;gap:8px}
+  .bcard .confirm-bar .btn{padding:7px 16px;border-radius:99px;font:800 13px 'Nunito',sans-serif;cursor:pointer}
+  .bcard .confirm-bar .yes{background:#FF6B5E;color:#fff}
+  .bcard .confirm-bar .no{background:#fff;color:#2A2455;box-shadow:0 3px 10px rgba(42,36,85,.15)}
+  #newCard{border:2px dashed #C9C8E8;background:#FBFBFF;box-shadow:none;display:flex;align-items:center;justify-content:center;min-height:130px;color:#4B2ED6;font:800 34px 'Nunito',sans-serif}
+  #titleInput{background:#fff;border:none;border-radius:14px;box-shadow:0 6px 16px rgba(42,36,85,.16);padding:9px 16px;font:800 17px 'Baloo 2',sans-serif;color:#2A2455;outline:none;max-width:60vw;min-width:120px}
 </style>
 </head>
 <body>
@@ -165,18 +196,25 @@
     </div>
   </div>
 
+  <div id="home">
+    <div id="homeWrap">
+      <div id="homeBar">
+        <div class="brand">mewmew</div>
+        <div id="homeNew">＋</div>
+      </div>
+      <div id="grid"></div>
+    </div>
+  </div>
+
 <script>
 "use strict";
 (function(){
   // ---------- constants ----------
-  var LS_KEY = 'mewmew.board.v1';
   var PALETTE = ['#FFC53D','#FF6B5E','#14C7B8','#7A5CFF'];
   var NOTE_TILT = true;   // random slight rotation on new notes
   var FAB_LABELS = true;  // show Note/Text/Arrow labels
 
   var clamp = function(v,lo,hi){ return Math.min(hi, Math.max(lo, v)); };
-
-  // ---------- state ----------
   function seed(){
     return {
       items: [
@@ -189,32 +227,232 @@
       pan: { x:0, y:0 }, scale:1, uid:10
     };
   }
-  function load(){
-    try {
-      var raw = localStorage.getItem(LS_KEY);
-      if (!raw) return null;
-      var d = JSON.parse(raw);
-      return {
-        items: Array.isArray(d.items) ? d.items : [],
-        arrows: Array.isArray(d.arrows) ? d.arrows : [],
-        pan: d.pan || { x:0, y:0 },
-        scale: typeof d.scale === 'number' ? d.scale : 1,
-        uid: typeof d.uid === 'number' ? d.uid : 10
-      };
-    } catch(e){ return null; }
+
+  // ---------- identity + transport ----------
+  var ONLINE = location.protocol !== 'file:';   // no backend when opened as a bare file
+  function uuid(){
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch(e){}
+    return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2,10);
   }
-  function save(){
+  var OWNER = (function(){
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        items: state.items, arrows: state.arrows, pan: state.pan, scale: state.scale, uid: state.uid
-      }));
-    } catch(e){}
+      var k = localStorage.getItem('mewmew.owner');
+      if (!k || !/^[A-Za-z0-9_-]{8,64}$/.test(k)){
+        k = uuid().replace(/[^A-Za-z0-9_-]/g,'');
+        if (k.length < 8) k = 'anon' + Date.now().toString(36);
+        localStorage.setItem('mewmew.owner', k);
+      }
+      return k;
+    } catch(e){ return 'anon-localdev'; }
+  })();
+  function api(method, path, bodyObj){
+    return fetch('/api' + path, {
+      method: method,
+      headers: bodyObj ? { 'x-mew-owner':OWNER, 'content-type':'application/json' } : { 'x-mew-owner':OWNER },
+      body: bodyObj ? JSON.stringify(bodyObj) : undefined
+    }).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); });
   }
 
-  var state = load() || seed();
-  // ephemeral (never persisted)
-  state.sel = null; state.selType = null; state.mode = 'idle';
-  state.arrowFrom = null; state.fabOpen = false; state.editing = null;
+  // ---------- local cache (offline + instant previews) ----------
+  function cacheBoard(id, data){ try { localStorage.setItem('mewmew.b.'+id, JSON.stringify(data)); } catch(e){} }
+  function cachedBoard(id){ try { var r = localStorage.getItem('mewmew.b.'+id); return r ? JSON.parse(r) : null; } catch(e){ return null; } }
+  function cacheIndex(arr){ try { localStorage.setItem('mewmew.index', JSON.stringify(arr)); } catch(e){} }
+  function cachedIndex(){ try { var r = localStorage.getItem('mewmew.index'); var a = r ? JSON.parse(r) : []; return Array.isArray(a) ? a : []; } catch(e){ return []; } }
+  function now(){ return new Date().toISOString(); }
+
+  // ---------- boards (the DB-backed list) ----------
+  var boards = [];            // index entries: {id,name,thumb,updatedAt,items}
+  var saveTimer = null;
+
+  function canvasData(){ return { items:state.items, arrows:state.arrows, pan:state.pan, scale:state.scale, uid:state.uid }; }
+  function indexEntry(id){ for (var i=0;i<boards.length;i++) if (boards[i].id===id) return boards[i]; return null; }
+  function sortBoards(){ boards.sort(function(a,b){ return String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')); }); }
+  function upsertLocalEntry(entry){
+    var e = indexEntry(entry.id);
+    if (e){ for (var k in entry) e[k] = entry[k]; } else boards.push(entry);
+    sortBoards(); cacheIndex(boards);
+  }
+
+  // Whole-board save — immediate to cache, debounced to the server.
+  function save(){
+    if (!state.id) return;
+    cacheBoard(state.id, canvasData());
+    var e = indexEntry(state.id);
+    if (e){ e.updatedAt = now(); e.items = state.items.length; sortBoards(); cacheIndex(boards); }
+    if (!ONLINE) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){
+      var id = state.id; if (!id) return;
+      api('PUT', '/boards/'+id, { data: canvasData() }).then(function(en){ if (en) upsertLocalEntry(en); }).catch(function(){});
+    }, 600);
+  }
+  function flushSave(){
+    if (!saveTimer) return;
+    clearTimeout(saveTimer); saveTimer = null;
+    if (ONLINE && state.id) api('PUT', '/boards/'+state.id, { data: canvasData() }).catch(function(){});
+  }
+
+  function setCanvas(data){
+    data = data || {};
+    clearNodes();
+    state.items  = Array.isArray(data.items) ? data.items : [];
+    state.arrows = Array.isArray(data.arrows) ? data.arrows : [];
+    state.pan    = (data.pan && typeof data.pan==='object') ? data.pan : { x:0, y:0 };
+    state.scale  = typeof data.scale==='number' ? data.scale : 1;
+    state.uid    = typeof data.uid==='number' ? data.uid : 10;
+    state.sel=null; state.selType=null; state.editing=null; state.mode='idle'; state.arrowFrom=null; state.fabOpen=false;
+  }
+  function resumeEmbeds(){ state.items.forEach(function(it){ if (it.type==='embed' && it.estate!=='ready') unfurl(it); }); }
+
+  function openBoard(id){
+    var entry = indexEntry(id);
+    state.id = id;
+    setCanvas(cachedBoard(id) || {});   // instant from cache
+    setTitle(entry ? entry.name : 'Board');
+    showEditor(); render(); resumeEmbeds();
+    if (ONLINE){
+      api('GET', '/boards/'+id).then(function(b){
+        if (!b || state.id!==id) return;
+        if (b.name) setTitle(b.name);
+        if (b.data){ setCanvas(b.data); cacheBoard(id, b.data); render(); resumeEmbeds(); }
+      }).catch(function(){});
+    }
+  }
+  function newBoard(){
+    var id = uuid();
+    var data = { items:[], arrows:[], pan:{x:0,y:0}, scale:1, uid:10 };
+    boards.unshift({ id:id, name:'Untitled', thumb:null, updatedAt:now(), items:0 });
+    cacheIndex(boards); cacheBoard(id, data);
+    if (ONLINE) api('POST', '/boards', { id:id, name:'Untitled', data:data }).then(function(e){ if (e) upsertLocalEntry(e); }).catch(function(){});
+    state.id = id; setCanvas(data); setTitle('Untitled'); showEditor(); render();
+  }
+  function deleteBoard(id){
+    boards = boards.filter(function(b){ return b.id!==id; });
+    cacheIndex(boards);
+    try { localStorage.removeItem('mewmew.b.'+id); } catch(e){}
+    if (ONLINE) api('DELETE', '/boards/'+id).catch(function(){});
+    if (state.id===id) state.id = null;
+    renderHome();
+  }
+  function renameBoard(name){
+    name = (name||'').trim().slice(0,120) || 'Untitled';
+    var e = indexEntry(state.id); if (e){ e.name = name; e.updatedAt = now(); cacheIndex(boards); }
+    setTitle(name);
+    if (ONLINE && state.id) api('PUT', '/boards/'+state.id, { name:name }).catch(function(){});
+  }
+
+  // ---------- home screen ----------
+  function setTitle(name){ var el = document.getElementById('boardTitle'); if (el) el.textContent = name; }
+  function showEditor(){ document.getElementById('home').classList.remove('on'); }
+  function showHome(){ flushSave(); state.id = null; renderHome(); document.getElementById('home').classList.add('on'); }
+  function ago(iso){
+    var t = iso ? Date.parse(iso) : NaN; if (isNaN(t)) return 'just now';
+    var s = Math.max(0, (Date.now()-t)/1000);
+    if (s < 60) return 'just now';
+    var m = s/60; if (m < 60) return Math.floor(m)+'m ago';
+    var h = m/60; if (h < 24) return Math.floor(h)+'h ago';
+    var d = h/24; if (d < 7) return Math.floor(d)+'d ago';
+    return Math.floor(d/7)+'w ago';
+  }
+  function previewSVG(data){
+    var items = (data && data.items) || [], arrows = (data && data.arrows) || [];
+    if (!items.length) return '';
+    var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity, byId={}, boxes=[];
+    items.forEach(function(it){
+      var d = dims(it);
+      byId[it.id] = { cx: it.x + d.w/2, cy: it.y + d.h/2 };
+      minX=Math.min(minX,it.x); minY=Math.min(minY,it.y); maxX=Math.max(maxX,it.x+d.w); maxY=Math.max(maxY,it.y+d.h);
+      boxes.push({ it:it, d:d });
+    });
+    var pad=24; minX-=pad; minY-=pad; maxX+=pad; maxY+=pad;
+    var W=Math.max(1,maxX-minX), H=Math.max(1,maxY-minY), sw=Math.max(W,H)*0.008, parts=[];
+    arrows.forEach(function(a){
+      var A=byId[a.from], B=byId[a.to]; if(!A||!B) return;
+      parts.push('<line x1="'+A.cx+'" y1="'+A.cy+'" x2="'+B.cx+'" y2="'+B.cy+'" stroke="#C0B5EF" stroke-width="'+(sw*2)+'" stroke-linecap="round"/>');
+    });
+    boxes.forEach(function(b){
+      var it=b.it, d=b.d, r=Math.min(d.w,d.h)*0.16;
+      if (it.type==='note') parts.push('<rect x="'+it.x+'" y="'+it.y+'" width="'+d.w+'" height="'+d.h+'" rx="'+r+'" fill="'+it.color+'"/>');
+      else if (it.type==='embed') parts.push('<rect x="'+it.x+'" y="'+it.y+'" width="'+d.w+'" height="'+d.h+'" rx="'+r+'" fill="#E3E1F6"/>');
+      else parts.push('<rect x="'+it.x+'" y="'+(it.y+d.h*0.25)+'" width="'+d.w+'" height="'+(d.h*0.5)+'" rx="'+(d.h*0.25)+'" fill="'+it.color+'"/>');
+    });
+    return '<svg class="prev" viewBox="'+minX+' '+minY+' '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+parts.join('')+'</svg>';
+  }
+  function boardCard(bd){
+    var card = document.createElement('div'); card.className='bcard';
+    var data = cachedBoard(bd.id), svg = data ? previewSVG(data) : '';
+    if (svg) card.insertAdjacentHTML('afterbegin', svg);
+    else { var ph=document.createElement('div'); ph.className='prev empty'; ph.textContent='✎'; card.appendChild(ph); }
+    var meta = document.createElement('div'); meta.className='meta';
+    var nm = document.createElement('div'); nm.className='bname'; nm.textContent = bd.name || 'Untitled';
+    var sub = document.createElement('div'); sub.className='bsub';
+    var n = (typeof bd.items==='number') ? bd.items : (data ? (data.items||[]).length : 0);
+    sub.textContent = n + (n===1?' item':' items') + ' · ' + ago(bd.updatedAt);
+    meta.appendChild(nm); meta.appendChild(sub); card.appendChild(meta);
+    var del = document.createElement('div'); del.className='del'; del.textContent='✕'; card.appendChild(del);
+    var bar = document.createElement('div'); bar.className='confirm-bar';
+    bar.innerHTML = '<div class="q">Delete?</div><div class="row"><div class="btn yes">Delete</div><div class="btn no">Keep</div></div>';
+    card.appendChild(bar);
+    card.addEventListener('click', function(){ if (!card.classList.contains('confirm')) openBoard(bd.id); });
+    del.addEventListener('click', function(e){ e.stopPropagation(); card.classList.add('confirm'); });
+    bar.querySelector('.no').addEventListener('click', function(e){ e.stopPropagation(); card.classList.remove('confirm'); });
+    bar.querySelector('.yes').addEventListener('click', function(e){ e.stopPropagation(); deleteBoard(bd.id); });
+    return card;
+  }
+  function renderHome(){
+    var grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    boards.forEach(function(bd){ grid.appendChild(boardCard(bd)); });
+    var nc = document.createElement('div'); nc.id='newCard'; nc.className='bcard'; nc.textContent='＋';
+    nc.addEventListener('click', function(){ newBoard(); });
+    grid.appendChild(nc);
+  }
+
+  // ---------- boot ----------
+  function migrateLegacy(){
+    var raw; try { raw = localStorage.getItem('mewmew.board.v1'); } catch(e){ return; }
+    if (!raw) return;
+    var d; try { d = JSON.parse(raw); } catch(e){ d=null; }
+    try { localStorage.removeItem('mewmew.board.v1'); } catch(e){}
+    if (!d || !Array.isArray(d.items)) return;
+    var id = uuid();
+    var data = { items:d.items, arrows:Array.isArray(d.arrows)?d.arrows:[], pan:d.pan||{x:0,y:0}, scale:typeof d.scale==='number'?d.scale:1, uid:typeof d.uid==='number'?d.uid:10 };
+    boards.unshift({ id:id, name:'My board', thumb:null, updatedAt:now(), items:data.items.length });
+    cacheBoard(id, data); cacheIndex(boards);
+    if (ONLINE) api('POST', '/boards', { id:id, name:'My board', data:data }).catch(function(){});
+  }
+  function ensureFirstBoard(){
+    if (boards.length) { renderHome(); return; }
+    var flag; try { flag = localStorage.getItem('mewmew.init'); } catch(e){}
+    if (flag){ renderHome(); return; }              // they cleared all boards on purpose
+    try { localStorage.setItem('mewmew.init','1'); } catch(e){}
+    var id = uuid(), data = seed();
+    boards.unshift({ id:id, name:'Weekend trip', thumb:null, updatedAt:now(), items:data.items.length });
+    cacheBoard(id, data); cacheIndex(boards);
+    if (ONLINE) api('POST', '/boards', { id:id, name:'Weekend trip', data:data }).catch(function(){});
+    renderHome();
+  }
+  function init(){
+    boards = cachedIndex();
+    migrateLegacy();
+    renderHome();
+    document.getElementById('home').classList.add('on');
+    render();                                        // empty editor underneath
+    if (ONLINE){
+      api('GET', '/boards').then(function(list){
+        if (!Array.isArray(list)) return;
+        var seen = {}; list.forEach(function(e){ seen[e.id]=true; });
+        var localOnly = boards.filter(function(b){ return !seen[b.id]; });  // offline-created, not yet synced
+        boards = list.concat(localOnly); sortBoards(); cacheIndex(boards);
+        ensureFirstBoard();
+      }).catch(function(){ ensureFirstBoard(); });
+    } else {
+      ensureFirstBoard();
+    }
+  }
+
+  var state = { items:[], arrows:[], pan:{x:0,y:0}, scale:1, uid:10, id:null,
+                sel:null, selType:null, mode:'idle', arrowFrom:null, fabOpen:false, editing:null };
 
   // ---------- element refs ----------
   var board   = document.getElementById('board');
@@ -233,6 +471,7 @@
   var linkBackdrop = document.getElementById('linkBackdrop');
 
   var itemNodes = {}; // id -> { el, disp, ta, handle }
+  function clearNodes(){ for (var id in itemNodes){ if (itemNodes[id].el) itemNodes[id].el.remove(); } itemNodes = {}; }
 
   // ---------- geometry ----------
   function dims(it){
@@ -783,6 +1022,31 @@
     e.stopPropagation(); state.mode = 'idle'; state.arrowFrom = null; render();
   });
 
+  // ---------- board list wiring ----------
+  document.querySelector('#topbar .back').addEventListener('click', function(){ showHome(); });
+  document.getElementById('homeNew').addEventListener('click', function(){ newBoard(); });
+  function startRename(){
+    if (!state.id) return;
+    var el = document.getElementById('boardTitle'); if (!el) return;
+    var cur = el.textContent;
+    var inp = document.createElement('input'); inp.id='titleInput'; inp.value=cur;
+    el.replaceWith(inp); inp.focus(); try { inp.select(); } catch(e){}
+    var done = function(){
+      var v = inp.value;
+      var t = document.createElement('div'); t.className='title'; t.id='boardTitle';
+      t.textContent = (v.trim() || 'Untitled');
+      t.addEventListener('click', startRename);
+      inp.replaceWith(t);
+      renameBoard(v);
+    };
+    inp.addEventListener('keydown', function(e){
+      if (e.key==='Enter'){ e.preventDefault(); inp.blur(); }
+      else if (e.key==='Escape'){ inp.value=cur; inp.blur(); }
+    });
+    inp.addEventListener('blur', done);
+  }
+  document.getElementById('boardTitle').addEventListener('click', startRename);
+
   // desktop niceties: wheel / trackpad zoom toward the cursor
   board.addEventListener('wheel', function(e){
     e.preventDefault();
@@ -794,10 +1058,7 @@
   board.addEventListener('gesturestart', function(e){ e.preventDefault(); });
   window.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
-  render();
-
-  // resume any embeds that hadn't finished loading last session
-  state.items.forEach(function(it){ if (it.type === 'embed' && it.estate !== 'ready') unfurl(it); });
+  init();
 })();
 </script>
 </body>
