@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#F3F5FF">
+<title>mewmew · board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
+  body{
+    position:fixed;inset:0;background:#F3F5FF;
+    font-family:'Nunito',sans-serif;color:#2A2455;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  /* ---- board (the pannable / zoomable canvas) ---- */
+  #board{
+    position:fixed;inset:0;background:#F3F5FF;
+    background-image:radial-gradient(circle,#D6DCF8 1.6px,transparent 1.6px);
+    background-size:24px 24px;
+    overflow:hidden;touch-action:none;cursor:grab;
+  }
+  #board.grabbing{cursor:grabbing}
+  #board.placing{cursor:crosshair}
+  #world{position:absolute;left:0;top:0;transform-origin:0 0}
+  #items{position:absolute;left:0;top:0}
+  #arrows{position:absolute;left:0;top:0;width:10px;height:10px;overflow:visible;pointer-events:none}
+
+  textarea::placeholder{color:rgba(42,36,85,.35)}
+  @keyframes popin{from{opacity:0;transform:translateY(10px) scale(.9)}to{opacity:1;transform:translateY(0) scale(1)}}
+  .pop{animation:popin .15s ease}
+
+  /* ---- floating chrome (fixed physical size on every screen) ---- */
+  #topbar{
+    position:absolute;
+    top:calc(14px + env(safe-area-inset-top));
+    left:calc(14px + env(safe-area-inset-left));
+    right:calc(14px + env(safe-area-inset-right));
+    display:flex;align-items:center;gap:10px;pointer-events:none;z-index:4;
+  }
+  #topbar .back{
+    width:42px;height:42px;background:#fff;border-radius:14px;
+    box-shadow:0 6px 16px rgba(42,36,85,.16);display:flex;align-items:center;justify-content:center;
+    font:800 20px 'Baloo 2',sans-serif;color:#4B2ED6;flex-shrink:0;
+  }
+  #topbar .title{
+    background:#fff;border-radius:14px;box-shadow:0 6px 16px rgba(42,36,85,.16);
+    padding:9px 16px;font:800 17px 'Baloo 2',sans-serif;color:#2A2455;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60vw;
+  }
+
+  #banner{
+    position:absolute;top:calc(70px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+    display:none;align-items:center;gap:12px;background:#2A2455;border-radius:99px;
+    box-shadow:0 10px 24px rgba(42,36,85,.35);padding:10px 10px 10px 18px;white-space:nowrap;z-index:5;
+  }
+  #banner .btxt{font:800 14px 'Nunito',sans-serif;color:#fff}
+  #banner .cancel{font:800 13px 'Nunito',sans-serif;color:#2A2455;background:#FFC53D;border-radius:99px;padding:5px 12px;cursor:pointer}
+
+  #zoom{
+    position:absolute;left:calc(16px + env(safe-area-inset-left));
+    bottom:calc(20px + env(safe-area-inset-bottom));
+    display:flex;align-items:center;gap:2px;background:#fff;border-radius:99px;
+    box-shadow:0 6px 16px rgba(42,36,85,.16);padding:6px 10px;z-index:4;
+  }
+  #zoom .zb{font:800 17px 'Nunito',sans-serif;color:#4B2ED6;cursor:pointer;padding:0 6px}
+  #zoom .zp{font:800 12px 'Nunito',sans-serif;color:#9A99B8;min-width:38px;text-align:center}
+
+  #fab{
+    position:absolute;right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(20px + env(safe-area-inset-bottom));
+    display:flex;flex-direction:column;align-items:flex-end;gap:12px;z-index:4;
+  }
+  #fabStack{display:none;flex-direction:column;align-items:flex-end;gap:12px}
+  #fab .row{display:flex;align-items:center;gap:10px}
+  #fab .label{background:#fff;border-radius:99px;box-shadow:0 4px 12px rgba(42,36,85,.16);padding:5px 12px;font:800 13px 'Nunito',sans-serif;color:#4B2ED6}
+  #fab .tool{width:52px;height:52px;background:#fff;border-radius:50%;box-shadow:0 8px 18px rgba(42,36,85,.22);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  #fab .main{
+    width:62px;height:62px;background:#4B2ED6;border-radius:50%;
+    box-shadow:0 12px 24px rgba(75,46,214,.4);display:flex;align-items:center;justify-content:center;
+    font:800 28px 'Nunito',sans-serif;color:#fff;cursor:pointer;transition:transform .18s ease;
+  }
+
+  #hint{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    display:none;text-align:center;pointer-events:none;z-index:1;
+    font:700 15px 'Nunito',sans-serif;color:rgba(42,36,85,.35);max-width:240px;line-height:1.5;
+  }
+</style>
+</head>
+<body>
+  <div id="board">
+    <div id="world">
+      <svg id="arrows">
+        <defs>
+          <marker id="ahb" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#4B2ED6"></path></marker>
+          <marker id="ahs" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#FF6B5E"></path></marker>
+        </defs>
+        <g id="arrowPaths"></g>
+      </svg>
+      <div id="items"></div>
+    </div>
+
+    <div id="hint">Tap <b>＋</b> to add a note, text, or an arrow between notes.</div>
+
+    <div id="topbar">
+      <div class="back">‹</div>
+      <div class="title" id="boardTitle">Weekend trip</div>
+    </div>
+
+    <div id="banner"><span class="btxt"></span><span class="cancel">Cancel</span></div>
+
+    <div id="zoom">
+      <div class="zb" data-z="out">−</div>
+      <div class="zp">100%</div>
+      <div class="zb" data-z="in">＋</div>
+    </div>
+
+    <div id="fab">
+      <div id="fabStack">
+        <div class="row"><div class="label">Note</div><div class="tool" data-tool="note"><div style="width:20px;height:20px;background:#FFC53D;border-radius:6px"></div></div></div>
+        <div class="row"><div class="label">Text</div><div class="tool" data-tool="text" style="font:800 20px 'Baloo 2',sans-serif;color:#4B2ED6">T</div></div>
+        <div class="row"><div class="label">Arrow</div><div class="tool" data-tool="arrow" style="font:800 22px 'Nunito',sans-serif;color:#4B2ED6">→</div></div>
+      </div>
+      <div class="main" id="fabMain">＋</div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+(function(){
+  // ---------- constants ----------
+  var LS_KEY = 'mewmew.board.v1';
+  var PALETTE = ['#FFC53D','#FF6B5E','#14C7B8','#7A5CFF'];
+  var NOTE_TILT = true;   // random slight rotation on new notes
+  var FAB_LABELS = true;  // show Note/Text/Arrow labels
+
+  var clamp = function(v,lo,hi){ return Math.min(hi, Math.max(lo, v)); };
+
+  // ---------- state ----------
+  function seed(){
+    return {
+      items: [
+        { id:'t1', type:'text', x:36,  y:96,  fs:24, color:'#2A2455', text:'Saturday plan' },
+        { id:'n1', type:'note', x:40,  y:150, s:120, color:'#FFC53D', text:'Book the cabin', rot:-2 },
+        { id:'n2', type:'note', x:225, y:260, s:120, color:'#14C7B8', text:'Invite Maya', rot:1.5 },
+        { id:'n3', type:'note', x:52,  y:372, s:120, color:'#FF6B5E', text:'Snacks + playlist', rot:1 }
+      ],
+      arrows: [ { id:'a1', from:'n1', to:'n2' }, { id:'a2', from:'n3', to:'n2' } ],
+      pan: { x:0, y:0 }, scale:1, uid:10
+    };
+  }
+  function load(){
+    try {
+      var raw = localStorage.getItem(LS_KEY);
+      if (!raw) return null;
+      var d = JSON.parse(raw);
+      return {
+        items: Array.isArray(d.items) ? d.items : [],
+        arrows: Array.isArray(d.arrows) ? d.arrows : [],
+        pan: d.pan || { x:0, y:0 },
+        scale: typeof d.scale === 'number' ? d.scale : 1,
+        uid: typeof d.uid === 'number' ? d.uid : 10
+      };
+    } catch(e){ return null; }
+  }
+  function save(){
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        items: state.items, arrows: state.arrows, pan: state.pan, scale: state.scale, uid: state.uid
+      }));
+    } catch(e){}
+  }
+
+  var state = load() || seed();
+  // ephemeral (never persisted)
+  state.sel = null; state.selType = null; state.mode = 'idle';
+  state.arrowFrom = null; state.fabOpen = false; state.editing = null;
+
+  // ---------- element refs ----------
+  var board   = document.getElementById('board');
+  var world   = document.getElementById('world');
+  var itemsEl = document.getElementById('items');
+  var arrowPaths = document.getElementById('arrowPaths');
+  var banner  = document.getElementById('banner');
+  var bannerTxt = banner.querySelector('.btxt');
+  var zoomPct = document.querySelector('#zoom .zp');
+  var fabStack = document.getElementById('fabStack');
+  var fabMain = document.getElementById('fabMain');
+  var hint = document.getElementById('hint');
+
+  var itemNodes = {}; // id -> { el, disp, ta, handle }
+
+  // ---------- geometry ----------
+  function dims(it){
+    if (it.type === 'note') return { w: it.s, h: it.s };
+    var len = Math.max(3, (it.text || '').length);
+    return { w: Math.min(240, Math.max(56, len * it.fs * 0.48)) + 16, h: it.fs * 1.3 + 8 };
+  }
+  function toWorld(clientX, clientY){
+    var r = board.getBoundingClientRect();
+    return { x: (clientX - r.left - state.pan.x) / state.scale, y: (clientY - r.top - state.pan.y) / state.scale };
+  }
+
+  // ---------- pointer / drag machinery ----------
+  var drag = null, pinch = null, listening = false;
+  var pointers = new Map();
+
+  function listen(){
+    if (listening) return;
+    window.addEventListener('pointermove', winMove);
+    window.addEventListener('pointerup', winUp);
+    window.addEventListener('pointercancel', winUp);
+    listening = true;
+  }
+  function unlisten(){
+    window.removeEventListener('pointermove', winMove);
+    window.removeEventListener('pointerup', winUp);
+    window.removeEventListener('pointercancel', winUp);
+    listening = false;
+  }
+
+  function canvasDown(e){
+    pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if (pointers.size === 2){
+      var it = pointers.values();
+      var p1 = it.next().value, p2 = it.next().value;
+      var r = board.getBoundingClientRect();
+      drag = null;
+      pinch = {
+        d0: Math.hypot(p2.x - p1.x, p2.y - p1.y),
+        mx: (p1.x + p2.x)/2 - r.left, my: (p1.y + p2.y)/2 - r.top,
+        pan0: { x: state.pan.x, y: state.pan.y }, s0: state.scale
+      };
+      listen();
+      return;
+    }
+    drag = { t:'pan', sx:e.clientX, sy:e.clientY, ox:state.pan.x, oy:state.pan.y, moved:false, ev:{ clientX:e.clientX, clientY:e.clientY } };
+    board.classList.add('grabbing');
+    listen();
+  }
+  function itemDown(id, e){
+    e.stopPropagation();
+    if (state.mode === 'arrow'){ tapArrowEnd(id); return; }
+    if (state.editing === id) return;
+    var it = findItem(id);
+    if (!it) return;
+    drag = { t:'item', id:id, sx:e.clientX, sy:e.clientY, ox:it.x, oy:it.y, moved:false };
+    listen();
+  }
+  function resizeDown(id, e){
+    e.stopPropagation();
+    var it = findItem(id);
+    if (!it) return;
+    drag = { t:'resize', id:id, sx:e.clientX, sy:e.clientY, o: it.type === 'note' ? it.s : it.fs, kind: it.type, moved:false };
+    listen();
+  }
+  function winMove(e){
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if (pinch && pointers.size >= 2){
+      var it = pointers.values();
+      var p1 = it.next().value, p2 = it.next().value;
+      var d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      var ns = clamp(pinch.s0 * d / pinch.d0, 0.5, 2.5);
+      var k = ns / pinch.s0;
+      state.scale = ns;
+      state.pan = { x: pinch.mx - (pinch.mx - pinch.pan0.x) * k, y: pinch.my - (pinch.my - pinch.pan0.y) * k };
+      render();
+      return;
+    }
+    var d0 = drag; if (!d0) return;
+    var dx = e.clientX - d0.sx, dy = e.clientY - d0.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 6) d0.moved = true;
+    if (!d0.moved) return;
+    var sc = state.scale;
+    if (d0.t === 'item'){
+      setItem(d0.id, { x: d0.ox + dx/sc, y: d0.oy + dy/sc });
+    } else if (d0.t === 'pan'){
+      state.pan = { x: d0.ox + dx, y: d0.oy + dy };
+      render();
+    } else if (d0.t === 'resize'){
+      if (d0.kind === 'note') setItem(d0.id, { s: clamp(d0.o + Math.max(dx, dy)/sc, 84, 240) });
+      else setItem(d0.id, { fs: clamp(d0.o + dx/sc * 0.2, 14, 46) });
+    }
+  }
+  function winUp(e){
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    var d = drag; drag = null;
+    board.classList.remove('grabbing');
+    if (pointers.size === 0) unlisten();
+    if (!d || d.moved){ if (d && d.moved) save(); return; }
+    if (d.t === 'pan') canvasTap(d.ev);
+    else if (d.t === 'item') itemTap(d.id);
+  }
+
+  // ---------- taps ----------
+  function canvasTap(ev){
+    var mode = state.mode;
+    if (mode === 'note'){
+      var p = toWorld(ev.clientX, ev.clientY);
+      var id = 'n' + (state.uid++);
+      var tilt = NOTE_TILT ? (Math.random()*5 - 2.5) : 0;
+      state.items.push({ id:id, type:'note', x:p.x-60, y:p.y-60, s:120, color:'#FFC53D', text:'', rot:tilt });
+      state.mode='idle'; state.sel=id; state.selType='item'; state.editing=id;
+      render(); save();
+    } else if (mode === 'text'){
+      var p2 = toWorld(ev.clientX, ev.clientY);
+      var id2 = 't' + (state.uid++);
+      state.items.push({ id:id2, type:'text', x:p2.x-20, y:p2.y-16, fs:24, color:'#2A2455', text:'' });
+      state.mode='idle'; state.sel=id2; state.selType='item'; state.editing=id2;
+      render(); save();
+    } else if (mode !== 'arrow'){
+      state.sel=null; state.selType=null; state.editing=null; state.fabOpen=false;
+      render();
+    }
+  }
+  function itemTap(id){
+    if (state.sel === id && state.selType === 'item') state.editing = id;
+    else { state.sel = id; state.selType = 'item'; state.editing = null; }
+    render();
+  }
+  function tapArrowEnd(id){
+    if (!state.arrowFrom){ state.arrowFrom = id; render(); return; }
+    if (state.arrowFrom !== id){
+      var a = { id:'a' + (state.uid++), from: state.arrowFrom, to: id };
+      state.arrows.push(a);
+      state.mode='idle'; state.arrowFrom=null; state.sel=a.id; state.selType='arrow';
+      render(); save();
+    }
+  }
+
+  // ---------- mutations ----------
+  function findItem(id){ for (var i=0;i<state.items.length;i++) if (state.items[i].id===id) return state.items[i]; return null; }
+  function setItem(id, patch){ var it = findItem(id); if (it){ for (var k in patch) it[k] = patch[k]; } render(); }
+  function delSel(){
+    var sel = state.sel, selType = state.selType;
+    if (!sel) return;
+    if (selType === 'arrow'){
+      state.arrows = state.arrows.filter(function(a){ return a.id !== sel; });
+    } else {
+      state.items = state.items.filter(function(i){ return i.id !== sel; });
+      state.arrows = state.arrows.filter(function(a){ return a.from !== sel && a.to !== sel; });
+    }
+    state.sel=null; state.selType=null; state.editing=null;
+    render(); save();
+  }
+  function zoomBy(f, cx, cy){
+    var r = board.getBoundingClientRect();
+    if (cx == null){ cx = r.width/2; cy = r.height/2; }
+    var ns = clamp(state.scale * f, 0.5, 2.5);
+    var k = ns / state.scale;
+    state.pan = { x: cx - (cx - state.pan.x) * k, y: cy - (cy - state.pan.y) * k };
+    state.scale = ns;
+    render(); save();
+  }
+
+  // ---------- item node building ----------
+  function makeHandle(id){
+    var h = document.createElement('div');
+    h.style.cssText = 'position:absolute;right:-13px;bottom:-13px;width:24px;height:24px;background:#fff;border:3px solid #4B2ED6;border-radius:50%;box-sizing:border-box;touch-action:none;cursor:nwse-resize;z-index:2';
+    h.addEventListener('pointerdown', function(e){ resizeDown(id, e); });
+    return h;
+  }
+  function ensureNode(it){
+    var n = itemNodes[it.id];
+    if (n) return n;
+    var el = document.createElement('div');
+    el.addEventListener('pointerdown', function(e){ itemDown(it.id, e); });
+    n = { el:el, disp:null, ta:null, handle:null };
+    itemNodes[it.id] = n;
+    itemsEl.appendChild(el);
+    return n;
+  }
+  function setEditing(n, it, taStyle){
+    if (n.disp){ n.disp.remove(); n.disp = null; }
+    if (!n.ta){
+      var ta = document.createElement('textarea');
+      ta.setAttribute('placeholder','Type…');
+      if (it.type === 'text') ta.setAttribute('rows','1');
+      ta.value = it.text || '';
+      ta.style.cssText = taStyle;
+      ta.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+      ta.addEventListener('input', function(){ setItem(it.id, { text: ta.value }); });
+      ta.addEventListener('blur', function(){ if (state.editing === it.id){ state.editing = null; render(); save(); } });
+      n.el.appendChild(ta);
+      n.ta = ta;
+      ta.focus();
+      var v = ta.value.length; try { ta.setSelectionRange(v, v); } catch(e){}
+    } else {
+      n.ta.style.cssText = taStyle;
+    }
+  }
+  function setViewing(n, it, dispStyle){
+    if (n.ta){ n.ta.remove(); n.ta = null; }
+    if (!n.disp){ n.disp = document.createElement('div'); n.el.appendChild(n.disp); }
+    n.disp.style.cssText = dispStyle;
+    n.disp.textContent = it.text || '';
+  }
+  function updateNode(it){
+    var n = ensureNode(it);
+    var el = n.el;
+    var selected = state.sel === it.id && state.selType === 'item';
+    var editing = state.editing === it.id;
+    var outline = selected ? '3px solid #4B2ED6' : (state.arrowFrom === it.id ? '3px dashed #FF6B5E' : 'none');
+
+    if (it.type === 'note'){
+      var tc = it.color === '#FFC53D' ? '#4A3A00' : '#fff';
+      var nfs = Math.round(it.s * 0.125);
+      var rot = NOTE_TILT ? (it.rot || 0) : 0;
+      el.style.cssText = 'position:absolute;left:'+it.x+'px;top:'+it.y+'px;width:'+it.s+'px;height:'+it.s+'px;background:'+it.color+';border-radius:16px;box-shadow:0 10px 22px rgba(42,36,85,.18);padding:13px;box-sizing:border-box;transform:rotate('+rot+'deg);touch-action:none;cursor:grab;outline:'+outline+';outline-offset:3px';
+      if (editing){
+        setEditing(n, it, "position:absolute;inset:0;padding:13px;background:transparent;border:none;outline:none;resize:none;font:700 "+nfs+"px/1.3 'Nunito',sans-serif;color:"+tc+";box-sizing:border-box");
+      } else {
+        setViewing(n, it, "font:700 "+nfs+"px/1.3 'Nunito',sans-serif;color:"+tc+";white-space:pre-wrap;word-break:break-word;pointer-events:none");
+      }
+    } else {
+      var fs = Math.round(it.fs);
+      el.style.cssText = 'position:absolute;left:'+it.x+'px;top:'+it.y+'px;min-width:40px;min-height:24px;padding:4px 8px;touch-action:none;cursor:grab;outline:'+outline+';outline-offset:4px;border-radius:6px';
+      if (editing){
+        setEditing(n, it, "background:transparent;border:none;outline:none;resize:none;width:220px;font:800 "+fs+"px/1.2 'Baloo 2',sans-serif;color:"+it.color+";padding:0");
+      } else {
+        setViewing(n, it, "font:800 "+fs+"px/1.2 'Baloo 2',sans-serif;color:"+it.color+";white-space:pre-wrap;pointer-events:none");
+      }
+    }
+
+    // resize handle (shown whenever the item is selected)
+    if (selected){
+      if (!n.handle){ n.handle = makeHandle(it.id); }
+      el.appendChild(n.handle); // keep it last so it stays on top
+    } else if (n.handle){ n.handle.remove(); n.handle = null; }
+  }
+
+  // ---------- toolbars (live in world space) ----------
+  var itemTb = document.createElement('div');
+  itemTb.style.cssText = 'position:absolute;display:none;align-items:center;gap:8px;background:#fff;border-radius:99px;box-shadow:0 8px 20px rgba(42,36,85,.22);padding:9px 14px;z-index:3;transform:translate(-50%,-100%)';
+  itemTb.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+  var swatches = [];
+  PALETTE.forEach(function(hex){
+    var s = document.createElement('div');
+    s.style.cssText = 'width:20px;height:20px;background:'+hex+';border-radius:50%;outline-offset:2px;cursor:pointer';
+    s.addEventListener('pointerdown', function(e){ e.stopPropagation(); if (state.sel){ setItem(state.sel, { color: hex }); save(); } });
+    itemTb.appendChild(s); swatches.push(s);
+  });
+  var divider = document.createElement('div');
+  divider.style.cssText = 'width:2px;height:18px;background:#E4E2F5;margin:0 2px';
+  itemTb.appendChild(divider);
+  var delBtn = document.createElement('div');
+  delBtn.textContent = '✕';
+  delBtn.style.cssText = "font:800 16px 'Nunito',sans-serif;color:#FF6B5E;cursor:pointer;padding:0 2px";
+  delBtn.addEventListener('pointerdown', function(e){ e.stopPropagation(); delSel(); });
+  itemTb.appendChild(delBtn);
+  world.appendChild(itemTb);
+
+  var arrowTb = document.createElement('div');
+  arrowTb.style.cssText = 'position:absolute;display:none;align-items:center;background:#fff;border-radius:99px;box-shadow:0 8px 20px rgba(42,36,85,.22);padding:8px 14px;z-index:3;transform:translate(-50%,-100%)';
+  arrowTb.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+  arrowTb.innerHTML = '<div style="cursor:pointer;display:flex;align-items:center;justify-content:center;width:22px;height:22px"><svg width="16" height="18" viewBox="0 0 16 18" fill="none"><path d="M1 4h14M5.5 4V2.5A1.5 1.5 0 0 1 7 1h2a1.5 1.5 0 0 1 1.5 1.5V4M3 4l1 11.5A1.5 1.5 0 0 0 5.5 17h5a1.5 1.5 0 0 0 1.5-1.5L13 4M6.3 7.5v6M9.7 7.5v6" stroke="#FF6B5E" stroke-width="1.8" stroke-linecap="round"></path></svg></div>';
+  arrowTb.addEventListener('pointerdown', function(e){ e.stopPropagation(); }, true);
+  arrowTb.firstChild.addEventListener('pointerdown', function(e){ e.stopPropagation(); delSel(); });
+  world.appendChild(arrowTb);
+
+  // ---------- render ----------
+  function render(){
+    // world transform
+    world.style.transform = 'translate('+state.pan.x+'px,'+state.pan.y+'px) scale('+state.scale+')';
+
+    var byId = {};
+    state.items.forEach(function(i){ byId[i.id] = i; });
+
+    // items (reconcile by id)
+    var seen = {};
+    state.items.forEach(function(it){ seen[it.id] = true; updateNode(it); });
+    for (var id in itemNodes){
+      if (!seen[id]){ itemNodes[id].el.remove(); delete itemNodes[id]; }
+    }
+
+    // arrows (rebuild)
+    while (arrowPaths.firstChild) arrowPaths.removeChild(arrowPaths.firstChild);
+    var selArrow = null;
+    state.arrows.forEach(function(a){
+      var A = byId[a.from], B = byId[a.to];
+      if (!A || !B) return;
+      var da = dims(A), db = dims(B);
+      var ca = { x: A.x + da.w/2, y: A.y + da.h/2 }, cb = { x: B.x + db.w/2, y: B.y + db.h/2 };
+      var vx = cb.x - ca.x, vy = cb.y - ca.y, L = Math.hypot(vx, vy) || 1;
+      function edge(c, dim, sign){
+        var m = 10;
+        var tx = vx !== 0 ? (dim.w/2 + m)/Math.abs(vx) : Infinity;
+        var ty = vy !== 0 ? (dim.h/2 + m)/Math.abs(vy) : Infinity;
+        var t = Math.min(Math.min(tx, ty), 0.45);
+        return { x: c.x + sign*vx*t, y: c.y + sign*vy*t };
+      }
+      var p1 = edge(ca, da, 1), p2 = edge(cb, db, -1);
+      var mx = (p1.x + p2.x)/2 - vy/L*16, my = (p1.y + p2.y)/2 + vx/L*16;
+      var selected = state.sel === a.id && state.selType === 'arrow';
+      var d = 'M'+p1.x+','+p1.y+' Q'+mx+','+my+' '+p2.x+','+p2.y;
+
+      var vis = document.createElementNS('http://www.w3.org/2000/svg','path');
+      vis.setAttribute('d', d); vis.setAttribute('fill','none');
+      vis.setAttribute('stroke', selected ? '#FF6B5E' : '#4B2ED6');
+      vis.setAttribute('stroke-width', selected ? 4.5 : 3);
+      vis.setAttribute('stroke-linecap','round');
+      vis.setAttribute('marker-end', selected ? 'url(#ahs)' : 'url(#ahb)');
+      arrowPaths.appendChild(vis);
+
+      var hit = document.createElementNS('http://www.w3.org/2000/svg','path');
+      hit.setAttribute('d', d); hit.setAttribute('fill','none');
+      hit.setAttribute('stroke','rgba(0,0,0,0)'); hit.setAttribute('stroke-width','28');
+      hit.setAttribute('stroke-linecap','round');
+      hit.style.cssText = 'pointer-events:stroke;cursor:pointer;touch-action:none';
+      hit.addEventListener('pointerdown', function(e){ e.stopPropagation(); state.sel = a.id; state.selType = 'arrow'; state.editing = null; render(); save(); });
+      arrowPaths.appendChild(hit);
+
+      if (selected){ selArrow = { mx: mx, my: my }; }
+    });
+
+    // item color toolbar
+    var selItem = state.selType === 'item' ? byId[state.sel] : null;
+    if (selItem && !state.editing){
+      var sd = dims(selItem);
+      itemTb.style.left = (selItem.x + sd.w/2) + 'px';
+      itemTb.style.top = (selItem.y - 16) + 'px';
+      itemTb.style.display = 'flex';
+      swatches.forEach(function(s, i){ s.style.outline = (selItem.color === PALETTE[i]) ? '2.5px solid #4B2ED6' : 'none'; });
+      if (!itemTb._shown){ itemTb.classList.remove('pop'); void itemTb.offsetWidth; itemTb.classList.add('pop'); itemTb._shown = true; }
+    } else { itemTb.style.display = 'none'; itemTb._shown = false; }
+
+    // arrow toolbar
+    if (selArrow){
+      arrowTb.style.left = selArrow.mx + 'px';
+      arrowTb.style.top = (selArrow.my - 14) + 'px';
+      arrowTb.style.display = 'flex';
+      if (!arrowTb._shown){ arrowTb.classList.remove('pop'); void arrowTb.offsetWidth; arrowTb.classList.add('pop'); arrowTb._shown = true; }
+    } else { arrowTb.style.display = 'none'; arrowTb._shown = false; }
+
+    // mode banner
+    var b = state.mode === 'note' ? 'Tap anywhere to place a note'
+          : state.mode === 'text' ? 'Tap anywhere to place text'
+          : state.mode === 'arrow' ? (state.arrowFrom ? 'Now tap the second item' : 'Tap the first item') : '';
+    if (state.mode !== 'idle'){ bannerTxt.textContent = b; banner.style.display = 'flex'; }
+    else banner.style.display = 'none';
+
+    // fab
+    fabMain.style.transform = 'rotate(' + (state.fabOpen ? 45 : 0) + 'deg)';
+    fabStack.style.display = state.fabOpen ? 'flex' : 'none';
+
+    // zoom label + placing cursor
+    zoomPct.textContent = Math.round(state.scale * 100) + '%';
+    board.classList.toggle('placing', state.mode === 'note' || state.mode === 'text');
+
+    // empty hint
+    hint.style.display = (state.items.length === 0 && state.arrows.length === 0) ? 'block' : 'none';
+  }
+
+  // ---------- static control wiring ----------
+  board.addEventListener('pointerdown', canvasDown);
+
+  document.querySelectorAll('#zoom .zb').forEach(function(btn){
+    btn.addEventListener('pointerdown', function(e){ e.stopPropagation(); zoomBy(btn.dataset.z === 'in' ? 1.2 : 1/1.2); });
+  });
+
+  fabMain.addEventListener('pointerdown', function(e){
+    e.stopPropagation();
+    state.fabOpen = !state.fabOpen; state.mode = 'idle'; state.arrowFrom = null;
+    render();
+  });
+  document.querySelectorAll('#fab .tool').forEach(function(t){
+    t.addEventListener('pointerdown', function(e){
+      e.stopPropagation();
+      state.mode = t.dataset.tool; state.fabOpen = false;
+      state.arrowFrom = null; state.sel = null; state.selType = null; state.editing = null;
+      render();
+    });
+  });
+  // keep the whole fab/zoom groups from starting a canvas pan
+  document.getElementById('fab').addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+  document.getElementById('zoom').addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+
+  banner.querySelector('.cancel').addEventListener('pointerdown', function(e){
+    e.stopPropagation(); state.mode = 'idle'; state.arrowFrom = null; render();
+  });
+
+  // desktop niceties: wheel / trackpad zoom toward the cursor
+  board.addEventListener('wheel', function(e){
+    e.preventDefault();
+    var r = board.getBoundingClientRect();
+    zoomBy(e.deltaY < 0 ? 1.1 : 1/1.1, e.clientX - r.left, e.clientY - r.top);
+  }, { passive:false });
+
+  // stop iOS double-tap zoom / long-press callout leaking through
+  board.addEventListener('gesturestart', function(e){ e.preventDefault(); });
+  window.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+  render();
+})();
+</script>
+</body>
+</html>
