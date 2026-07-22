@@ -30,6 +30,7 @@ export default async function handler(req, res){
     res.setHeader('allow', 'GET, POST');
     return send(res, 405, { error:'method' });
   } catch(e){
+    console.error('[mew] /api/boards ' + req.method, e && (e.stack || e.message) || e);
     return send(res, 500, { error:'server', detail:String(e.message||e) });
   }
 }

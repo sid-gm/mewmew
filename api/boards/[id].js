@@ -49,6 +49,7 @@ export default async function handler(req, res){
     res.setHeader('allow', 'GET, PUT, DELETE');
     return send(res, 405, { error:'method' });
   } catch(e){
+    console.error('[mew] /api/boards/[id] ' + req.method, e && (e.stack || e.message) || e);
     return send(res, 500, { error:'server', detail:String(e.message||e) });
   }
 }
