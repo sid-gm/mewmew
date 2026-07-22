@@ -1,28 +1,23 @@
-// TEMPORARY diagnostic — remove after debugging blob writes.
-import { put, list, del } from '@vercel/blob';
-
-async function tryPut(access){
-  const path = `boards/_diag/${access}.json`;
-  try {
-    const w = await put(path, JSON.stringify({ t: 1 }), {
-      access, addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json'
-    });
-    let readStatus = null;
-    try { const r = await fetch(w.url, { cache: 'no-store' }); readStatus = r.status; }
-    catch(e){ readStatus = 'fetch-threw:' + String(e && (e.message||e)); }
-    try { await del(w.url); } catch(e){}
-    return { ok: true, url: w.url, readStatus };
-  } catch(e){
-    return { ok: false, name: e && e.name, error: String(e && (e.message||e)) };
-  }
-}
+// TEMPORARY diagnostic — remove once private read/write is confirmed.
+import { put, del, get } from '@vercel/blob';
 
 export default async function handler(req, res){
   res.setHeader('content-type', 'application/json');
   const out = { rwToken: !!process.env.BLOB_READ_WRITE_TOKEN };
-  try { const { blobs } = await list({ limit: 5 }); out.existingBlobs = blobs.map(b => b.pathname); }
-  catch(e){ out.listError = String(e && (e.message||e)); }
-  out.public = await tryPut('public');
-  out.private = await tryPut('private');
+  const path = 'boards/_diag/private.json';
+  try {
+    const w = await put(path, JSON.stringify({ t: 1, hi: 'mew' }), {
+      access: 'private', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json'
+    });
+    out.putUrl = w.url;
+    const g = await get(path, { access: 'private', useCache: false });
+    out.getStatus = g && g.statusCode;
+    out.readBack = (g && g.statusCode === 200) ? await new Response(g.stream).json() : null;
+    await del(w.url);
+    out.deleted = true;
+    out.ok = true;
+  } catch(e){
+    out.ok = false; out.name = e && e.name; out.error = String(e && (e.message||e));
+  }
   res.end(JSON.stringify(out));
 }
